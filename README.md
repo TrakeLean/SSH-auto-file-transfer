@@ -1,2 +1,0 @@
-# SSH-auto-file-transfer
- 
