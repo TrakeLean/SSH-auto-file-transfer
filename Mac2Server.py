@@ -23,6 +23,7 @@ if len(sys.argv) > 0:
     _, stdout, _ = client.exec_command('ls')
     output = stdout.read().decode("utf8").split("\n")
 
+    print("")
     if 'plex' in output:
         print('Plex folder found')
         stdin, stdout, stderr = client.exec_command('ls')
@@ -39,8 +40,6 @@ if len(sys.argv) > 0:
     else:
         print('Plex folder not found, creating')
         client.exec_command('mkdir -p plex/movies plex/series')
-
-    print("")
     
     # Find directory of local movies
     local_dir = (f'{os.path.dirname(sys.argv[1])}/plex')
@@ -83,7 +82,7 @@ if len(sys.argv) > 0:
             else:
                 remote_path = f'{ssh_directory}/plex/movies/{local_movie}'
                 print(f'||{size:.03f}gb|| ~~~ Transfering movie: {local_movie}')
-                # sftp.put(local_movie_path, remote_path)
+                sftp.put(local_movie_path, remote_path)
             
     if 'series' in local_dir:
         # Find directory of local movies
@@ -128,15 +127,15 @@ if len(sys.argv) > 0:
             print(f'||{size:.03f}gb|| ~~~ Transerfering Series: {local_serie}')
             
             for episode in episode_list:
-                local_path = f'{os.path.dirname(sys.argv[1])}/{local_serie}/{local_serie}'
-                remote_path = f'{ssh_directory}/plex/series/{local_serie}/{local_serie}'
+                local_path = f'{os.path.dirname(sys.argv[1])}/plex/series/{local_serie}/{episode}'
+                remote_path = f'{ssh_directory}/plex/series/{local_serie}/{episode}'
                 
                 # Change the remote working directory to ssh_directory/plex/series/(series name)
-                sftp.chdir(f'{ssh_directory}/plex/series/{local_serie}') 
+                sftp.chdir(f'{ssh_directory}/plex/series/{local_serie}')
                 # Calcualte size of file
                 size = (((os.path.getsize(episode)/1024)/1024)/1024)
                 print(f'||{size:.03f}gb|| ~~ Transerfering Episode: {episode}') 
-                # sftp.put(local_path, remote_path)
+                sftp.put(local_path, remote_path)
         else:
             print("="*70)
             print(f'||{size:.03f}gb|| ~~~ Series already here: {local_serie}')
