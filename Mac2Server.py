@@ -1,149 +1,142 @@
-from paramiko import SSHClient, AutoAddPolicy
+import paramiko
 
 import sys
 import os
+import traceback
+import time
 
+
+
+def calculate_rest(transferred, total, start_time):
+    percentage = (transferred / total) * 100
+    speed = transferred / (1024 * 1024 * (time.time() - start_time))
+    print_msg = f' ~ {(((transferred/1024)/1024)/1024):.03f}/{(((total/1024)/1024)/1024):.03f}GB ({percentage:.2f}%) @ {speed:.2f} MB/s'
+    print_msg_length = len(print_msg)
+    print(f'{print_msg}\033[{print_msg_length}D', end='')
+    if (percentage == 100):
+        print("")
+    
+
+def transfer_files(sftp, local_path, remote_path, dir_list):
+    """
+    Recursively transfer files from local_path to remote_path.
+    """
+    new = True
+    for name in os.listdir(local_path):
+        local_file = os.path.join(local_path, name)
+        remote_file = os.path.join(remote_path, name)
+        size = (((os.path.getsize(local_file)/1024)/1024)/1024)
+
+        if os.path.isdir(local_file):
+            try:
+                client.exec_command(f'mkdir -p \'{remote_file}\'')
+                print("="*70)
+                print(f'|| ~~ Folder: {name}')
+                dir_list = sftp.listdir(remote_file)
+            except:
+                pass
+            transfer_files(sftp, local_file, remote_file, dir_list)
+        else:
+            if not name.startswith('.'):
+                if (new):
+                    print("-"*70)
+                    print(f'|| {local_file.split("/")[-3]} - {local_file.split("/")[-2]}')
+                # Check if episode is already there
+                if name in dir_list:
+                    # Get file size
+                    remote_size = (sftp.stat(remote_file).st_size)
+                    remote_size_in_gb = ((((remote_size)/1024)/1024)/1024)
+                    if (size > remote_size_in_gb):
+                        print(f'||WARNING|| ~~~ Part of file here: {name}')
+                        print(f' ~~~~~~~ || R ~ E ~ M ~ O ~ V ~ I ~ N ~ G || ~~~~~~~~~~~~')
+                        # Delete file then rewrite (faster)
+                        sftp.remove(remote_file)
+                        print(f'||{size:.03f}gb|| ~~ Transerfering File: {name}', end='')
+                        start_time = time.time()
+                        sftp.put(local_file, remote_file, callback=lambda transferred, total: calculate_rest(transferred, total, start_time=start_time))
+                    elif (size == remote_size_in_gb):
+                        print(f'||{size:.03f}gb|| ~~~ File already here: {name}')
+                        pass
+                    else:
+                        print(" || No space for file, ending script...")
+                        return
+                else:
+                    # Execute df command to get available space
+                    _, stdout, _ = client.exec_command('df -h /')
+
+                    # Parse the output to get the available space value
+                    output_lines = stdout.readlines()
+                    if len(output_lines) > 1:
+                        available_space = output_lines[1].split()[3]
+                        if "G" in available_space:
+                            available_space = float(available_space.replace("G", ""))
+                        elif "M" in available_space:
+                            available_space = ((float(available_space.replace("M", ""))/1024))
+                        elif "K" in available_space:
+                            available_space = (float(available_space.replace("K", ""))/1024/1024)
+                            
+                        if (available_space > size):
+                            print(f'||{size:.03f}gb|| ~~ Transerfering File: {name}', end='')
+
+                            start_time = time.time()
+                            # We need to send in start_time to be able to calculate download speed
+                            sftp.put(local_file, remote_file, callback=lambda transferred, total: calculate_rest(transferred, total, start_time=start_time))
+                            # client.exec_command(f'rsync -avz --progress {local_file} {ssh_username}@{ssh_host}:{remote_file}')
+                        else:
+                            print(f'|| ~~~~~~~~~~~~ NO MORE SPACE ON SERVER! Space left {available_space}')
+                            return
+
+                new = False
 
 
 if len(sys.argv) > 0:
-    client = SSHClient()
+    client = paramiko.SSHClient()
 
     #LOAD HOST KEYS
     client.load_host_keys('/Users/tareklein/.ssh/known_hosts')
     client.load_system_host_keys()
 
     #Known_host policy
-    client.set_missing_host_key_policy(AutoAddPolicy())
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    client.connect('trk.td.org.uit.no', username='tarek', password='tarek.123')
+    ssh_host = 'trk.td.org.uit.no'
+    ssh_username = 'tarek'
+    ssh_password = 'tarek.123'
+    
+    client.connect(ssh_host, username=ssh_username, password=ssh_password)
 
     _, stdout, _ = client.exec_command('pwd')
     ssh_directory = stdout.read().decode("utf8").split("\n")[0]
 
-    _, stdout, _ = client.exec_command('ls')
-    output = stdout.read().decode("utf8").split("\n")
-
+    # Start padding
     print("")
-    if 'plex' in output:
-        print('Plex folder found')
-        stdin, stdout, stderr = client.exec_command('ls')
-        plex_directory = stdout.read().decode("utf8").split("\n")
-        if 'movies' in plex_directory:
-            print('Movies folder found')
-        else:
-            client.exec_command('mkdir -p plex/movies')
-        if 'series' in plex_directory:
-            print('Series folder found')
-        else:
-            client.exec_command('mkdir -p plex/series')
-            
-    else:
-        print('Plex folder not found, creating')
-        client.exec_command('mkdir -p plex/movies plex/series')
+    print("="*70)
+    print(f'Starting SSH connection: {ssh_username}@{ssh_host}')
+    print("="*70)
+    print("")
     
-    # Find directory of local movies
-    local_dir = (f'{os.path.dirname(sys.argv[1])}/plex')
-    local_dir = os.listdir(local_dir)
-
-
-
-
-
     # Open SSH file transfer protocol
     sftp = client.open_sftp()
+
+    # Setup base for recursion transfer
+    local_path = f'{os.path.realpath(sys.argv[1])}'
+    # Find start directory for server
+    start_directory = local_path.split("/")[-1]
     
-    # # Change the remote working directory to ssh_directory/plex
-    # sftp.chdir(ssh_directory+'/plex')
+    remote_path = f'{ssh_directory}/{start_directory}'
     
-    if 'movies' in local_dir:
-        # Find directory of local movies
-        local_movies_dir = (f'{os.path.dirname(sys.argv[1])}/plex/movies')
-        
-        # Switch to local movies directory
-        os.chdir(local_movies_dir)
-        
-        # List up local movies
-        local_movies = [file for file in os.listdir(local_movies_dir) if not file.startswith('.')]
+    transfer_files(sftp, local_path, remote_path, _)
 
-        
-        # Change the remote working directory to ssh_directory/plex/movies
-        sftp.chdir(ssh_directory+'/plex/movies')
-        
-        _, stdout, _ = client.exec_command('ls plex/movies/')
-        remote_movies = stdout.read().decode("utf8").split("\n")
-        for local_movie in local_movies:
-            local_movie_path = os.path.realpath(local_movie)
-            
-            # Get the size of the file in bytes
-            size = (int(os.path.getsize((local_movie_path))/1024)/1024)/1024
-            print("="*70)
-            if local_movie in remote_movies:
-                print(f'||{size:.03f}gb|| ~~~ Movie already here: {local_movie}')
-            else:
-                remote_path = f'{ssh_directory}/plex/movies/{local_movie}'
-                print(f'||{size:.03f}gb|| ~~~ Transfering movie: {local_movie}')
-                sftp.put(local_movie_path, remote_path)
-            
-    if 'series' in local_dir:
-        # Find directory of local movies
-        local_series_dir = (f'{os.path.dirname(sys.argv[1])}/plex/series')
-        
-        # Switch to local movies directory
-        os.chdir(local_series_dir)
-        
-        # List up local movies
-        local_series = ([file for file in os.listdir(local_series_dir) if not file.startswith('.')])
-        
-        
-        # Change the remote working directory to ssh_directory/plex/series
-        sftp.chdir(ssh_directory+'/plex/series')
-        
-        _, stdout, _ = client.exec_command('ls plex/series/')
-        remote_series = stdout.read().decode("utf8").split("\n")
-        for local_serie in local_series:
-
-            # Save remote path
-            remote_path = f'\'{ssh_directory}/plex/series/{local_serie}\''
-            
-            # Change the remote working directory to ssh_directory/plex/series/(series folder name)
-            sftp.chdir(f'{ssh_directory}/plex/series/')
-            
-            # Create series folder
-            client.exec_command(f'mkdir {remote_path}')
-            
-            # Go into file_name directory on local computer
-            series_folder = f'{os.path.dirname(sys.argv[1])}/plex/series/{local_serie}'
-            os.chdir(series_folder)
-            
-            # Get a list of all the files in the directory
-            episode_list = os.listdir(series_folder)
-            
-            local_serie_path = os.path.join(local_series_dir, local_serie)
-            
-            # Get size of series folder in GB
-            size = (((os.path.getsize(f'{local_serie_path}')/1024)/1024)/1024)
-            
-            print("="*70)
-            print(f'||{size:.03f}gb|| ~~~ Transerfering Series: {local_serie}')
-            
-            for episode in episode_list:
-                local_path = f'{os.path.dirname(sys.argv[1])}/plex/series/{local_serie}/{episode}'
-                remote_path = f'{ssh_directory}/plex/series/{local_serie}/{episode}'
-                
-                # Change the remote working directory to ssh_directory/plex/series/(series name)
-                sftp.chdir(f'{ssh_directory}/plex/series/{local_serie}')
-                # Calcualte size of file
-                size = (((os.path.getsize(episode)/1024)/1024)/1024)
-                print(f'||{size:.03f}gb|| ~~ Transerfering Episode: {episode}') 
-                sftp.put(local_path, remote_path)
-        else:
-            print("="*70)
-            print(f'||{size:.03f}gb|| ~~~ Series already here: {local_serie}')
-
-    print("")
     sftp.close()
     client.close()
     
+    
+    # End padding
+    print("")
+    print("="*70)
+    print("Closing SSH connection...")
+    print("="*70)
+    print("")
+    
 else:
     print("No file dropped.")
-
