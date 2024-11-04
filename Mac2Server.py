@@ -99,9 +99,9 @@ if len(sys.argv) > 0:
     #Known_host policy
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    ssh_host = 'trk.td.org.uit.no'
-    ssh_username = 'tarek'
-    ssh_password = 'tarek.123'
+    ssh_host = ''
+    ssh_username = ''
+    ssh_password = ''
     
     client.connect(ssh_host, username=ssh_username, password=ssh_password)
 
